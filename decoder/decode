@@ -17,13 +17,12 @@ opts = optparser.parse_args()[0]
 tm = models.TM(opts.tm, opts.k)
 lm = models.LM(opts.lm)
 french = [tuple(line.strip().split()) for line in open(opts.input).readlines()[:opts.num_sents]]
+hypothesis = namedtuple("hypothesis", "logprob, lm_state, predecessor, phrase")
 
 # tm should translate unknown words as-is with probability 1
 for word in set(sum(french,())):
   if (word,) not in tm:
     tm[(word,)] = [models.phrase(word, 0.0)]
-
-hypothesis = namedtuple("hypothesis", "logprob, lm_state, predecessor, phrase")
 
 def extend_hypothesis(h, phrase, at_end=False):
   logprob = h.logprob + phrase.logprob
@@ -47,9 +46,9 @@ for f in french:
             unswitched = extend_hypothesis(h, phrase, j == len(f))
             if unswitched.lm_state not in stacks[j] or stacks[j][unswitched.lm_state].logprob < unswitched.logprob: # second case is recombination
               stacks[j][unswitched.lm_state] = unswitched
-            if h.predecessor:
+            if h.predecessor: # now try switched version
               switched = extend_hypothesis(extend_hypothesis(h.predecessor, phrase), h.phrase, j == len(f))
-              if switched.lm_state not in stacks[j] or stacks[j][switched.lm_state].logprob < switched.logprob: # second case is recombination
+              if switched.lm_state not in stacks[j] or stacks[j][switched.lm_state].logprob < switched.logprob:
                 stacks[j][switched.lm_state] = switched
   winner = max(stacks[-1].itervalues(), key=lambda h: h.logprob)
   def extract_english(h): 
