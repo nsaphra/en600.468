@@ -17,7 +17,7 @@ opts = optparser.parse_args()[0]
 tm = models.TM(opts.tm, opts.k)
 lm = models.LM(opts.lm)
 french = [tuple(line.strip().split()) for line in open(opts.input).readlines()[:opts.num_sents]]
-hypothesis = namedtuple("hypothesis", "logprob, lm_state, predecessor, phrase")
+hypothesis = namedtuple("hypothesis", "logprob, lm_state, predecessor, phrase, alts")
 
 # tm should translate unknown words as-is with probability 1
 for word in set(sum(french,())):
@@ -31,7 +31,7 @@ def extend_hypothesis(h, phrase, at_end=False):
     (lm_state, word_logprob) = lm.score(lm_state, word)
     logprob += word_logprob
   logprob += lm.end(lm_state) if at_end else 0.0
-  return hypothesis(logprob, lm_state, h, phrase)
+  return hypothesis(logprob, lm_state, h, phrase, [])
 
 sys.stderr.write("Decoding %s...\n" % (opts.input,))
 for f in french:
@@ -44,12 +44,32 @@ for f in french:
         for phrase in tm[f[i:j]]:
           for h in sorted(stack.itervalues(),key=lambda h: -h.logprob)[:opts.s]: # prune
             unswitched = extend_hypothesis(h, phrase, j == len(f))
-            if unswitched.lm_state not in stacks[j] or stacks[j][unswitched.lm_state].logprob < unswitched.logprob: # second case is recombination
+            if unswitched.lm_state not in stacks[j]:
               stacks[j][unswitched.lm_state] = unswitched
+            elif stacks[j][unswitched.lm_state].logprob < unswitched.logprob:
+              unswitched.alts.append(stacks[j][unswitched.lm_state].predecessor)
+              unswitched.alts.extend(stacks[j][unswitched.lm_state].alts[:2])
+              stacks[j][unswitched.lm_state] = unswitched
+            else:
+              stacks[j][unswitched.lm_state].alts.append(h)
+              stacks[j][unswitched.lm_state].alts.sort(key=lambda h: -h.logprob)
+              if stacks[j][unswitched.lm_state].alts > 3:
+                stacks[j][unswitched.lm_state].alts.pop()
+
             if h.predecessor: # now try switched version
+              for 
               switched = extend_hypothesis(extend_hypothesis(h.predecessor, phrase), h.phrase, j == len(f))
-              if switched.lm_state not in stacks[j] or stacks[j][switched.lm_state].logprob < switched.logprob:
+              if switched.lm_state not in stacks[j]:
                 stacks[j][switched.lm_state] = switched
+              elif stacks[j][switched.lm_state].logprob < switched.logprob:
+                switched.alts.append(stacks[j][switched.lm_state].predecessor)
+                switched.alts.extend(stacks[j][switched.lm_state].alts[:2])
+                stacks[j][switched.lm_state] = switched
+              else:
+                stacks[j][switched.lm_state].alts.append(h)
+                stacks[j][switched.lm_state].alts.sort(key=lambda h: -h.logprob)
+                if stacks[j][switched.lm_state].alts > 3:
+                  stacks[j][switched.lm_state].alts.pop()
           for j1 in xrange(i+1):
             for h_prev in sorted(stacks[j1].itervalues(), key=lambda h_prev: -h_prev.logprob)[:opts.s]: # prune
               if f[j1:i] in tm:
