@@ -39,10 +39,10 @@ for f in french:
   stacks = [{} for _ in f] + [{}]
   stacks[0][lm.begin()] = initial_hypothesis
   for i, stack in enumerate(stacks[:-1]):
-    for h in sorted(stack.itervalues(),key=lambda h: -h.logprob)[:opts.s]: # prune
-      for j in xrange(i+1,len(f)+1):
-        if f[i:j] in tm:
-          for phrase in tm[f[i:j]]:
+    for j in xrange(i+1,len(f)+1):
+      if f[i:j] in tm:
+        for phrase in tm[f[i:j]]:
+          for h in sorted(stack.itervalues(),key=lambda h: -h.logprob)[:opts.s]: # prune
             unswitched = extend_hypothesis(h, phrase, j == len(f))
             if unswitched.lm_state not in stacks[j] or stacks[j][unswitched.lm_state].logprob < unswitched.logprob: # second case is recombination
               stacks[j][unswitched.lm_state] = unswitched
@@ -50,6 +50,14 @@ for f in french:
               switched = extend_hypothesis(extend_hypothesis(h.predecessor, phrase), h.phrase, j == len(f))
               if switched.lm_state not in stacks[j] or stacks[j][switched.lm_state].logprob < switched.logprob:
                 stacks[j][switched.lm_state] = switched
+          for j1 in xrange(i+1):
+            for h_prev in sorted(stacks[j1].itervalues(), key=lambda h_prev: -h_prev.logprob)[:opts.s]: # prune
+              if f[j1:i] in tm:
+                for phrase1 in tm[f[j1:i]]:
+                  switched = extend_hypothesis(extend_hypothesis(h_prev, phrase), phrase1, j == len(f))
+                  if switched.lm_state not in stacks[j] or stacks[j][switched.lm_state].logprob < switched.logprob:
+                    stacks[j][switched.lm_state] = switched
+
   winner = max(stacks[-1].itervalues(), key=lambda h: h.logprob)
   def extract_english(h): 
     return "" if h.predecessor is None else "%s%s " % (extract_english(h.predecessor), h.phrase.english)
