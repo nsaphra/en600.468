@@ -1,9 +1,50 @@
 #!/usr/bin/env python
 import argparse # optparse is deprecated
 from itertools import islice # slicing for iterators
+from sklearn import svm
  
 def word_matches(h, ref):
     return sum(1 for w in h if w in ref)
+
+
+def get_ngrams(h):
+    hset_1gram = set()
+    hset_2gram = set()
+    hset_3gram = set()
+    hset_4gram = set()
+    for (ind, w) in enumerate(h):
+        hset_1gram.add(w)
+        if ind > 0:
+            hset_2gram.add(' '.join([h[ind-1], w]))
+            if ind > 1:
+                hset_3gram.add(' '.join([h[ind-2], h[ind-1], w]))
+                if ind > 2:
+                    hset_4gram.add(' '.join([h[ind-3], h[ind-2], h[ind-1], w]))
+    return (hset_1gram, hset_2gram, hset_3gram, hset_4gram)
+
+def get_gramfeats(hset, rset):
+    gramfeats = []
+    gramfeats += [len(hset & rset)] # raw match data
+    if rset:
+        gramfeats += [len(hset & rset)/len(rset)] # recall
+    else:
+        gramfeats += [0]
+    if hset:
+        gramfeats += [len(hset & rset)/len(hset)] # precision
+    else:
+        gramfeats += [0]
+    gramfeats += [len(hset)]
+    return gramfeats
+
+def get_sentfeats(h, ref):
+    ngram_hsets = get_ngrams(h)
+    ngram_rsets = get_ngrams(ref)
+    hfeats = []
+    for (hset, rset) in zip(ngram_hsets, ngram_rsets):
+        hfeats += get_gramfeats(hset, rset)
+    hfeats += [len(h), len(h)/len(ref)] # brevity penalties
+    hfeats += [min(1, len(h)/len(ref))] # bleu brevity penalty
+    return hfeats
  
 def main():
     parser = argparse.ArgumentParser(description='Evaluate translation hypotheses.')
@@ -11,6 +52,8 @@ def main():
             help='input file (default data/hyp1-hyp2-ref)')
     parser.add_argument('-n', '--num_sentences', default=None, type=int,
             help='Number of hypothesis pairs to evaluate')
+    parser.add_argument('-l', '--labels', default='data/dev.answers',
+            help='dev labels for training linear classifier')
     # note that if x == [1, 2, 3], then x[:None] == x[:] == x (copy); no need for sys.maxint
     opts = parser.parse_args()
  
@@ -19,16 +62,34 @@ def main():
         with open(opts.input) as f:
             for pair in f:
                 yield [sentence.strip().split() for sentence in pair.split(' ||| ')]
+
+    labels = [int(l) for l in open(opts.labels)]
  
+    h_feats = []
     # note: the -n option does not work in the original code
     for h1, h2, ref in islice(sentences(), opts.num_sentences):
         rset = set(ref)
+
+        # h1
         h1_match = word_matches(h1, rset)
+        h1_feats = get_sentfeats(h1, ref)
+
+        # h2
         h2_match = word_matches(h2, rset)
-        print(1 if h1_match > h2_match else # \begin{cases}
-                (0 if h1_match == h2_match
-                    else -1)) # \end{cases}
+        h2_feats = get_sentfeats(h2, ref)
+
+        h_feats.append(h1_feats + h2_feats)
+
+
+    svc = svm.SVC()
+    svc.fit(h_feats[:len(labels)], labels)
+    results = svc.predict(h_feats)
+    for label in results:
+        print label
+
  
 # convention to allow import of this file as a module
 if __name__ == '__main__':
     main()
+
+    
