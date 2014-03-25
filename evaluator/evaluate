@@ -80,12 +80,26 @@ def main():
 
         h_feats.append(h1_feats + h2_feats)
 
+    train_feats = []
+    train_labels = []
+    for (h, l) in zip(h_feats[:len(labels)], labels):
+        if l > 0:
+            train_labels.append(1)
+            train_feats.append(h)
+        elif l < 0:
+            train_labels.append(0)
+            train_feats.append(h)
 
     svc = svm.SVC()
-    svc.fit(h_feats[:len(labels)], labels)
-    results = svc.predict(h_feats)
-    for label in results:
-        print label
+    svc.fit(train_feats, train_labels)
+    results = svc.decision_function(h_feats)
+    for score in results:
+        if score < 0.48:
+            print "-1"
+        elif score > 0.52:
+            print "1"
+        else:
+            print "0"
 
  
 # convention to allow import of this file as a module
