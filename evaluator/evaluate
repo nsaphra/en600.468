@@ -6,6 +6,26 @@ from sklearn import svm
 def word_matches(h, ref):
     return sum(1 for w in h if w in ref)
 
+def distance(h, r):
+    dist_map = {}
+
+    def dist(len_h, len_r):
+        if len_h == 0:
+            return len_r
+        if len_r == 0:
+            return len_h
+        if (len_h, len_r) in dist_map:
+            return dist_map[(len_h, len_r)]
+        cost = 1
+        if h[len_h-1] == r[len_r-1]:
+            cost = 0
+        ret = min(dist(len_h-1, len_r) +1,
+            dist(len_h, len_r-1) +1,
+            dist(len_h - 1, len_r-1) + cost)
+        dist_map[(len_h, len_r)] = ret
+        return ret
+    return dist(len(h), len(r))
+
 
 def get_ngrams(h):
     hset_1gram = set()
@@ -25,14 +45,14 @@ def get_ngrams(h):
 def get_gramfeats(hset, rset):
     gramfeats = []
     gramfeats += [len(hset & rset)] # raw match data
-    if rset:
-        gramfeats += [len(hset & rset)/len(rset)] # recall
-    else:
-        gramfeats += [0]
-    if hset:
-        gramfeats += [len(hset & rset)/len(hset)] # precision
-    else:
-        gramfeats += [0]
+#    if rset:
+#        gramfeats += [len(hset & rset)/len(rset)] # recall
+#    else:
+#        gramfeats += [0]
+#    if hset:
+#        gramfeats += [len(hset & rset)/len(hset)] # precision
+#    else:
+#        gramfeats += [0]
     gramfeats += [len(hset)]
     return gramfeats
 
@@ -44,6 +64,7 @@ def get_sentfeats(h, ref):
         hfeats += get_gramfeats(hset, rset)
     hfeats += [len(h), len(h)/len(ref)] # brevity penalties
     hfeats += [min(1, len(h)/len(ref))] # bleu brevity penalty
+    hfeats += [distance(h, ref)] # levenshtein dist
     return hfeats
  
 def main():
@@ -66,40 +87,27 @@ def main():
     labels = [int(l) for l in open(opts.labels)]
  
     h_feats = []
+    h1s = []
+    h2s = []
     # note: the -n option does not work in the original code
     for h1, h2, ref in islice(sentences(), opts.num_sentences):
         rset = set(ref)
 
-        # h1
-        h1_match = word_matches(h1, rset)
         h1_feats = get_sentfeats(h1, ref)
-
-        # h2
-        h2_match = word_matches(h2, rset)
         h2_feats = get_sentfeats(h2, ref)
+        h1s.append(h1)
+        h2s.append(h2)
 
         h_feats.append(h1_feats + h2_feats)
 
-    train_feats = []
-    train_labels = []
-    for (h, l) in zip(h_feats[:len(labels)], labels):
-        if l > 0:
-            train_labels.append(1)
-            train_feats.append(h)
-        elif l < 0:
-            train_labels.append(0)
-            train_feats.append(h)
-
     svc = svm.SVC()
-    svc.fit(train_feats, train_labels)
-    results = svc.decision_function(h_feats)
-    for score in results:
-        if score < 0.48:
-            print "-1"
-        elif score > 0.52:
-            print "1"
+    svc.fit(h_feats[:len(labels)], labels)
+    results = svc.predict(h_feats)
+    for (i, score) in enumerate(results):
+        if h1s[i] == h2s[i]:
+            print 0
         else:
-            print "0"
+            print score
 
  
 # convention to allow import of this file as a module
