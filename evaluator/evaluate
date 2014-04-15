@@ -45,14 +45,14 @@ def get_ngrams(h):
 def get_gramfeats(hset, rset):
     gramfeats = []
     gramfeats += [len(hset & rset)] # raw match data
-#    if rset:
-#        gramfeats += [len(hset & rset)/len(rset)] # recall
-#    else:
-#        gramfeats += [0]
-#    if hset:
-#        gramfeats += [len(hset & rset)/len(hset)] # precision
-#    else:
-#        gramfeats += [0]
+    # if rset:
+    #     gramfeats += [len(hset & rset)/len(rset)] # recall
+    # else:
+    #     gramfeats += [0]
+    # if hset:
+    #     gramfeats += [len(hset & rset)/len(hset)] # precision
+    # else:
+    #     gramfeats += [0]
     gramfeats += [len(hset)]
     return gramfeats
 
@@ -62,9 +62,10 @@ def get_sentfeats(h, ref):
     hfeats = []
     for (hset, rset) in zip(ngram_hsets, ngram_rsets):
         hfeats += get_gramfeats(hset, rset)
-    hfeats += [len(h), len(h)/len(ref)] # brevity penalties
+    #hfeats += [len(h)] 
+    #hfeats += [len(h)/len(ref)] # brevity penalties
     hfeats += [min(1, len(h)/len(ref))] # bleu brevity penalty
-    hfeats += [distance(h, ref)] # levenshtein dist
+    #hfeats += [distance(h, ref)] # levenshtein dist
     return hfeats
  
 def main():
