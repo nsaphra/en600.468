@@ -11,6 +11,7 @@ class piecewise_fcn:
   def __init__(self):
     self.x = [min_w, -min_w]
     self.y = [0.0, 0.0]
+    self.bleu_stats = 
 
   def find_x(self, x):
     ind = bisect_left(self.x, x)
@@ -65,7 +66,7 @@ def upper_envelope(kbest_h, kbest_feats, bleu_scores, feat_name, weights):
     if top_ind < 0 or top_w_min >= -min_w:
       ret.append((prev_h, prev_w_min, -min_w, prev_bleu))
       break
-    ret.append((prev_ind, prev_w_min, top_w_min, prev_bleu))
+    ret.append((prev_h, prev_w_min, top_w_min, prev_bleu))
     curr_ind = top_ind
     ((prev_slope, prev_const), prev_h, prev_bleu) = data[top_ind]
     prev_w_min = top_w_min
