@@ -11,7 +11,6 @@ class piecewise_fcn:
   def __init__(self):
     self.x = [min_w, -min_w]
     self.y = [0.0, 0.0]
-    self.bleu_stats = 
 
   def find_x(self, x):
     ind = bisect_left(self.x, x)
