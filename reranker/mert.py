@@ -3,10 +3,11 @@ import sys
 import bleu
 from bisect import bisect_left
 import copy
+import random
 
-grad = .01
-MIN_W = -1.0
-eps = .01
+grad = .05
+MIN_W = -2.0
+eps = .05
 
 class piecewise_fcn:
   def __init__(self, num_sent):
@@ -42,7 +43,7 @@ class piecewise_fcn:
       for s in self.y[ind]:
         bleu_stats = [sum(scores) for scores in zip(s, bleu_stats)]
       bleu_scores[ind] = bleu.bleu(bleu_stats)
-    return max(zip(self.x, bleu_scores), key=lambda (x,y): y)
+    return max([((w+self.x[i+1])/2, score) for (i, (w, score)) in enumerate(zip(self.x[:-1], bleu_scores[:-1]))], key=lambda (x,y): y)
 
 
 def line_intersect(c1, x1, c2, x2):
@@ -51,9 +52,8 @@ def line_intersect(c1, x1, c2, x2):
 
 def sep_feat(feats, feat_name, weights):
   slope = feats[feat_name]
-  const = sum([w * feats[name] if name != feat_name for (name, w) in weights.items()])
+  const = sum([w * feats[name] if name != feat_name else 0 for (name, w) in weights.items()])
   return (slope, const)
-
 
 def upper_envelope(kbest_h, kbest_feats, bleu_stats, feat_name, weights):
   data = sorted([(sep_feat(feats, feat_name, weights), h_ind, bleu_) for (h_ind, (feats, h, bleu_)) in enumerate(zip(kbest_feats, kbest_h, bleu_stats))], key=lambda ((prev_slope, prev_const), prev_h_ind, prev_bleu): prev_slope)
@@ -85,24 +85,22 @@ def upper_envelope(kbest_h, kbest_feats, bleu_stats, feat_name, weights):
   return ret
 
 def mert(weights, data):
-  new_weights = {}
-  out = ""
-  shortcuts = {'p(e)' : 'l', 'p(e|f)' : 't', 'p_lex(f|e)' : 'u'}
-  for (name, w) in weights.items():
+  new_weights = copy.copy(weights)
+  for (name, w) in new_weights.items():
     f = piecewise_fcn(len(data))
     for (sent_ind, d) in data.items():
-      for (h_ind, w_min, w_max, curr_bleu_stats) in upper_envelope(d['kbest'], d['kbest_feats'], d['bleu'], name, weights):
+      for (h_ind, w_min, w_max, curr_bleu_stats) in upper_envelope(d['kbest'], d['kbest_feats'], d['bleu'], name, new_weights):
         f.incr(w_min, w_max, sent_ind, curr_bleu_stats)
-    for (i,b) in enumerate(f.y):
-      if -1 in b:
-        print f.x[i]
-        print b
     (top_w, b) = f.find_max()
-    print "w: %f b: %f" % (top_w, b)
     new_weights[name] = top_w
-    out += "-%s %s " % (shortcuts[name], w)
-  print out
   return new_weights
+
+def get_feats(h, feats):
+  f = {}
+  for feat in feats.split(' '):
+    (k, v) = feat.split('=')
+    f[k] = float(v)
+  return f
 
 def performance(weights, dev_src, dev_kbest, dev_ref):
   all_hyps = [pair.split(' ||| ') for pair in open(dev_kbest)]
@@ -115,9 +113,8 @@ def performance(weights, dev_src, dev_kbest, dev_ref):
     (best_score, best) = (-1e300, '')
     for (num, hyp, feats) in hyps_for_one_sent:
       score = 0.0
-      for feat in feats.split(' '):
-        (k, v) = feat.split('=')
-        score += weights[k] * float(v)
+      for (k,v) in get_feats(hyp, feats).items():
+        score += weights[k] * v
       if score > best_score:
         (best_score, best) = (score, hyp)
     stats = [sum(scores) for scores in zip(stats, bleu.bleu_stats(best.strip().split(),ref))]
@@ -158,26 +155,52 @@ def main():
     data[ind]['kbest'].append(h)
     data[ind]['kbest_feats'].append(feats)
 
-  bleu_stats = [0 for i in range(10)]
-  for (ind, d) in data.items():
-    bleu_stats = [sum(scores) for scores in zip(bleu_stats, bleu.bleu_stats(d['ref'], d['ref']))]
+  # bleu_stats = [0 for i in range(10)]
+  # for (ind, d) in data.items():
+  #   bleu_stats = [sum(scores) for scores in zip(bleu_stats, bleu.bleu_stats(d['ref'], d['ref']))]
   for (ind, d) in data.items():
     r = d['ref']
     for (h, feats) in zip(d['kbest'], d['kbest_feats']):
       d['bleu'].append([score for score in bleu.bleu_stats(h,r)])
 
   weights = {'p(e)' : opts.lm, 'p(e|f)' : opts.tm1, 'p_lex(f|e)' : opts.tm2} #, 'word_cnt':-1.0, 'untranslated_cnt':-1.0}
+  print "iter -1"
+  print "train BLEU %f" % performance(weights, opts.src, opts.kbest, opts.ref)
+  print "test BLEU %f" % performance(weights, "data/dev+test.src", "data/dev+test.100best", "data/dev.ref")
+  best_bleu = 0.0
+  best_test = 0.0
+  best_w = weights
+  shortcuts = {'p(e)' : 'l', 'p(e|f)' : 't', 'p_lex(f|e)' : 'u'}
   for i in range(10):
-    print "iter %d" % i
-    print "train BLEU %f" % performance(weights, opts.src, opts.kbest, opts.ref)
-    print "test BLEU %f" % performance(weights, "data/dev+test.src", "data/dev+test.100best", "data/dev.ref")
     new_weights = mert(weights, data)
+    print "iter %d" % i
+    train_bleu = performance(new_weights, opts.src, opts.kbest, opts.ref)
+    test_bleu = performance(new_weights, "data/dev+test.src", "data/dev+test.100best", "data/dev.ref")
+    print "train BLEU %f" % train_bleu
+    print "test BLEU %f" % test_bleu
+    out = ""
+    for (n, w) in new_weights.items():
+      out += "-%s %s " % (shortcuts[n], w)
+    print out
+    if train_bleu > best_bleu:
+      best_bleu = train_bleu
+      best_test = test_bleu
+      best_w = new_weights
     diff = 0.0
     for (n, w) in weights.items():
       diff += abs(w - new_weights[n])
     weights = new_weights
     if diff <= eps:
-      break
+      print "RANDOM RESTART"
+      for name in weights.keys():
+        weights[name] = random.uniform(MIN_W, 0.0)
+  print "BEST:"
+  print "train BLEU %f" % best_bleu
+  print "test BLEU %f" % best_test
+  out = ""
+  for (n, w) in best_w.items():
+    out += "-%s %s " % (shortcuts[n], w)
+  print out
 
 
 
