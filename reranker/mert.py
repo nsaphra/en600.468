@@ -51,7 +51,7 @@ def line_intersect(c1, x1, c2, x2):
 
 def sep_feat(feats, feat_name, weights):
   slope = feats[feat_name]
-  const = sum([w * feats[name] for (name, w) in weights.items()]) - slope*weights[feat_name]
+  const = sum([w * feats[name] if name != feat_name for (name, w) in weights.items()])
   return (slope, const)
 
 
@@ -98,6 +98,7 @@ def mert(weights, data):
         print f.x[i]
         print b
     (top_w, b) = f.find_max()
+    print "w: %f b: %f" % (top_w, b)
     new_weights[name] = top_w
     out += "-%s %s " % (shortcuts[name], w)
   print out
