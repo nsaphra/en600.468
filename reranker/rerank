@@ -10,19 +10,25 @@ optparser.add_option("-l", "--lm", dest="lm", default=-1.0, type="float", help="
 optparser.add_option("-t", "--tm1", dest="tm1", default=-0.5, type="float", help="Translation model p(e|f) weight")
 optparser.add_option("-u", "--tm2", dest="tm2", default=-0.5, type="float", help="Lexical translation model p_lex(f|e) weight")
 optparser.add_option("-c", "--word_cnt", dest="bp", default=0.5, type="float", help="brevity penalty weight")
+optparser.add_option("-g", "--greek_to_me", dest="untranslated", default=0.5, type="float", help="untranslated token weight")
 
 (opts, _) = optparser.parse_args()
 weights = {'p(e)'       : float(opts.lm) ,
            'p(e|f)'     : float(opts.tm1),
            'p_lex(f|e)' : float(opts.tm2),
-           'word_cnt'   : float(opts.bp)}
+           'word_cnt'   : float(opts.bp),
+           'untranslated_cnt' : float(opts.untranslated)}
 
 def get_feats(h, s, feats):
   f = {}
   for feat in feats.split(' '):
     (k, v) = feat.split('=')
     f[k] = float(v)
-  f['word_cnt'] = exp((1-len(s))/len(h)) if len(h) <= len(s) else 1
+  f['word_cnt'] = exp((1.0-len(s))/len(h)) if len(h) <= len(s) else 1
+  f['untranslated_cnt'] = 0.0
+  for htok in h:
+    if htok in s:
+      f['untranslated_cnt'] += 1.0
   return f
 
 all_hyps = [pair.split(' ||| ') for pair in open(opts.input)]

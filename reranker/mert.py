@@ -5,6 +5,7 @@ from bisect import bisect_left
 import copy
 import random
 from math import exp
+import string
 
 grad = .05
 MIN_W = -5.0
@@ -101,11 +102,13 @@ def get_feats(h, s, feats):
   for feat in feats.split(' '):
     (k, v) = feat.split('=')
     f[k] = float(v)
-  f['word_cnt'] = exp((1-len(s))/len(h)) if len(h) <= len(s) else 1
-  # f['untranslated_cnt'] = 0.0
-  # for htok in h:
-  #   if htok in s:
-  #     f['untranslated_cnt'] += 1.0
+  f['word_cnt'] = exp((1.0 - len(s))/len(h)) if len(h) <= len(s) else 1.0
+  # f['word_cnt'] = (1.0 - len(s))/len(h) if len(h) <= len(s) else 0.0
+  f['untranslated_cnt'] = 0.0
+  for htok in h:
+    if htok in s and htok not in string.punctuation:
+      f['untranslated_cnt'] += 1.0
+  # f['untranslated_cnt'] /= len(s)
   return f
 
 def performance(weights, dev_src, dev_kbest, dev_ref, print_out=False):
@@ -163,8 +166,8 @@ def main():
     for (h, feats) in zip(d['kbest'], d['kbest_feats']):
       d['bleu'].append([score for score in bleu.bleu_stats(h,r)])
 
-  shortcuts = {'p(e)' : 'l', 'p(e|f)' : 't', 'p_lex(f|e)' : 'u', 'word_cnt' : 'c'}
-  weights = {'p(e)' : opts.lm, 'p(e|f)' : opts.tm1, 'p_lex(f|e)' : opts.tm2, 'word_cnt':-0.5}#, 'untranslated_cnt':-1.0}
+  shortcuts = {'p(e)' : 'l', 'p(e|f)' : 't', 'p_lex(f|e)' : 'u', 'word_cnt' : 'c', 'untranslated_cnt': 'g'}
+  weights = {'p(e)' : opts.lm, 'p(e|f)' : opts.tm1, 'p_lex(f|e)' : opts.tm2, 'word_cnt':-0.5, 'untranslated_cnt':-0.5}
   sys.stderr.write( "iter -1\n")
   sys.stderr.write( "train BLEU %f\n" % performance(weights, opts.src, opts.kbest, opts.ref))
   sys.stderr.write( "test BLEU %f\n" % performance(weights, "data/dev+test.src", "data/dev+test.100best", "data/dev.ref"))
@@ -175,9 +178,11 @@ def main():
   best_bleu = 0.0
   best_test = 0.0
   best_w = weights
-  for i in range(10):
+  it = 0
+  prev_bleu = 0.0
+  while it < 5:
     new_weights = mert(weights, data)
-    sys.stderr.write( "iter %d\n" % i)
+    sys.stderr.write( "iter %d\n" % it)
     train_bleu = performance(new_weights, opts.src, opts.kbest, opts.ref)
     test_bleu = performance(new_weights, "data/dev+test.src", "data/dev+test.100best", "data/dev.ref")
     sys.stderr.write( "train BLEU %f\n" % train_bleu)
@@ -194,10 +199,13 @@ def main():
     for (n, w) in weights.items():
       diff += abs(w - new_weights[n])
     weights = new_weights
-    if diff <= eps:
+    if diff <= eps or abs(train_bleu - prev_bleu) < eps:
+      it += 1
+      break
       sys.stderr.write( "RANDOM RESTART\n")
       for name in weights.keys():
-        weights[name] = random.uniform(MIN_W, 0.0)
+        weights[name] = random.uniform(MIN_W, -MIN_W)
+  prev_bleu = train_bleu
   sys.stderr.write( "BEST:\n")
   sys.stderr.write( "train BLEU %f\n" % best_bleu)
   sys.stderr.write( "test BLEU %f\n" % performance(best_w, "data/dev+test.src", "data/dev+test.100best", "data/dev.ref", print_out=True))
