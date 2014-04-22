@@ -41,16 +41,18 @@ class piecewise_fcn:
   def find_max(self):
     bleu_scores = [0 for x in self.x]
     for (ind, x) in enumerate(self.x[:-1]):
-      bleu_stats = [0 for i in range(10)]
-      for s in self.y[ind]:
-        bleu_stats = [sum(scores) for scores in zip(s, bleu_stats)]
-      bleu_scores[ind] = bleu.bleu(bleu_stats)
-      stats = [sum(scores) for scores in zip(stats, bleu.bleu_stats(best.strip().split(),ref))]
+      bleu_scores[ind] = score_bleu_stats(self.y[ind])
+      # if bleu_scores[ind] == 0:
+      #   print self.y[ind]
+    # stats = [sum(scores) for scores in zip(stats, bleu.bleu_stats(best.strip().split(),ref))]
     return max([((w+self.x[i+1])/2, score) for (i, (w, score)) in enumerate(zip(self.x[:-1], bleu_scores[:-1]))], key=lambda (x,y): y)
 
+def get_score(slope, const, w):
+  return slope * w + const
+
 def line_intersect(c1, x1, c2, x2):
-  x = (c1-c2)/(x2-x1)
-  return (x, (c1 + x1*x))
+  w = (c1-c2)/(x2-x1)
+  return (w, get_score(x1, c1, w))
 
 def sep_feat(feats, feat_name, weights):
   slope = feats[feat_name]
@@ -59,7 +61,7 @@ def sep_feat(feats, feat_name, weights):
 
 def upper_envelope(kbest_h, kbest_feats, bleu_stats, feat_name, weights):
   data = sorted([(sep_feat(feats, feat_name, weights), h_ind, bleu_) for (h_ind, (feats, h, bleu_)) in enumerate(zip(kbest_feats, kbest_h, bleu_stats))], key=lambda ((prev_slope, prev_const), prev_h_ind, prev_bleu): prev_slope)
-  (prev_score, prev_sort_ind) = max([(slope*MIN_W+const, sort_ind) for (sort_ind, ((slope, const), h_ind, bleu_)) in enumerate(data)], key=lambda (x,y):x)
+  (prev_score, prev_sort_ind) = max([(get_score(slope, const, MIN_W), sort_ind) for (sort_ind, ((slope, const), h_ind, bleu_)) in enumerate(data)], key=lambda (x,y):x)
   ((prev_slope, prev_const), prev_h_ind, prev_bleu) = data[prev_sort_ind]
   ret = []
   prev_w_min = MIN_W
@@ -82,18 +84,21 @@ def upper_envelope(kbest_h, kbest_feats, bleu_stats, feat_name, weights):
       break
 
     # TODO del
-    prev_top_score_ = prev_slope*(top_w_min+prev_w_min)/2+prev_const
+    mid_w = (top_w_min+prev_w_min)/2
+    prev_top_score_ = get_score(prev_slope, prev_const, mid_w)
     for (sort_i, ((slope_, const_), h_ind_, curr_bleu_)) in enumerate(data):
-      score_ = slope_*(top_w_min+prev_w_min)/2+const_
+      score_ = get_score(slope_, const_, mid_w)
       if sort_i == prev_sort_ind:
         if abs(prev_top_score_ - score_) > 1e-14:
           sys.stderr.write("%f %f\n" % (prev_top_score_, score_))
           assert(abs(prev_score - score_) < 1e-14)
       else:
         if prev_top_score_ < prev_score:
+          sys.stderr.write("feat %s: curr w_min %f, curr w max %f\n" % (feat_name, prev_w_min, top_w_min))
           sys.stderr.write( "%f %f\n" % (prev_top_score_, score_))
 #          assert(False)
 
+    # print prev_bleu
     ret.append((prev_h_ind, prev_w_min, top_w_min, prev_bleu))
     prev_sort_ind = top_sort_ind
     prev_w_min = top_w_min
@@ -105,11 +110,12 @@ def mert(weights, data):
   new_weights = copy.copy(weights)
   for (name, w) in new_weights.items():
     f = piecewise_fcn(len(data))
-    for (sent_ind, d) in data.items():
+    for (sent_ind, d) in enumerate(data):
+      assert(len(d['kbest']) == len(d['kbest_feats']) and len(d['kbest_feats']) == len(d['bleu']))
       for (h_ind, w_min, w_max, curr_bleu_stats) in upper_envelope(d['kbest'], d['kbest_feats'], d['bleu'], name, new_weights):
         f.incr(w_min, w_max, sent_ind, curr_bleu_stats)
     (top_w, b) = f.find_max()
-    sys.stderr.write("%f\n" % b)
+    sys.stderr.write("newbleu: %f\n" % b)
     new_weights[name] = top_w
   return new_weights
 
@@ -118,8 +124,8 @@ def get_feats(h, s, feats):
   for feat in feats.split(' '):
     (k, v) = feat.split('=')
     f[k] = float(v)
-  f['word_cnt'] = exp((1.0 - len(s))/len(h)) if len(h) <= len(s) else 1.0
-  # f['word_cnt'] = (1.0 - len(s))/len(h) if len(h) <= len(s) else 0.0
+  # f['word_cnt'] = exp((1.0 - len(s))/len(h)) if len(h) <= len(s) else 1.0
+  f['word_cnt'] = -(1.0 - len(s))/len(h) if len(h) <= len(s) else 0.0
   f['untranslated_cnt'] = 0.0
   for htok in h:
     if htok in s and htok not in string.punctuation:
@@ -127,10 +133,16 @@ def get_feats(h, s, feats):
   # f['untranslated_cnt'] /= len(s)
   return f
 
+def score_bleu_stats(bleu_stats):
+  stats = [0 for i in xrange(10)]
+  for s in bleu_stats:
+    stats = [sum(scores) for scores in zip(s, stats)]
+  return bleu.bleu(stats)
+
 def performance(weights, dev_src, dev_kbest, dev_ref, print_out=False):
   all_hyps = [pair.split(' ||| ') for pair in open(dev_kbest)]
   num_sents = len(all_hyps) / 100
-  stats = [0 for i in xrange(10)]
+  stats = []
   ref_file = open(dev_ref)
   src_file = open(dev_src)
   for (ref, src, s) in zip(ref_file, src_file, xrange(0, num_sents)):
@@ -145,10 +157,10 @@ def performance(weights, dev_src, dev_kbest, dev_ref, print_out=False):
         score += weights[k] * v
       if score > best_score:
         (best_score, best) = (score, h_sent)
-    stats = [sum(scores) for scores in zip(stats, bleu.bleu_stats(best.strip().split(),ref))]
-    if print_out:
-      print best
-  return bleu.bleu(stats)
+    stats.append([i for i in bleu.bleu_stats(best.strip().split(),ref)])
+    # if print_out:
+    #   print best
+  return score_bleu_stats(stats)
 
 def main():
   optparser = optparse.OptionParser()
@@ -161,28 +173,22 @@ def main():
   optparser.add_option("-u", "--tm2", dest="tm2", default=-0.5, type="float", help="Lexical translation model p_lex(f|e) weight")
   (opts, _) = optparser.parse_args()
 
-
-  data = {}
-  sent_ind_from_id = {}
-  for (ind, (s, r)) in enumerate(zip(open(opts.src), open(opts.ref))):
+  data = [{'ref':r.strip().split()} for r in open(opts.ref)]
+  all_hyps = [pair.split(' ||| ') for pair in open(opts.kbest)]
+  for (ind, s) in enumerate(open(opts.src)):
     (sent_id, src_sent) = s.split(' ||| ', 1)
-    sent_ind_from_id[sent_id] = ind
-    data[ind] = {'src':src_sent.strip().split(), 'ref':r.strip().split(), 'kbest':[], 'kbest_feats':[], 'bleu':[]}
-  for l in open(opts.kbest):
-    (sent_id, h_sent, base_feats) = l.split(' ||| ')
-    ind = sent_ind_from_id[sent_id]
-    s = data[ind]['src']
-    r = data[ind]['ref']
-    h = h_sent.strip().split()
-    feats = get_feats(h, s, base_feats)
-    data[ind]['kbest'].append(h)
-    data[ind]['kbest_feats'].append(feats)
-    data[ind]['bleu'].append([score for score in bleu.bleu_stats(h,r)])
-
-  for (ind, d) in data.items():
-    r = d['ref']
-    for (h, feats) in zip(d['kbest'], d['kbest_feats']):
-      d['bleu'].append([score for score in bleu.bleu_stats(h,r)])
+    src = src_sent.strip().split()
+    ref = data[ind]['ref']
+    data[ind]['src'] = src
+    hyps_for_one_sent = all_hyps[ind * 100:ind * 100 + 100]
+    data[ind]['kbest'] = [-1 for i in hyps_for_one_sent]
+    data[ind]['kbest_feats'] = [-1 for i in hyps_for_one_sent]
+    data[ind]['bleu'] = [-1 for i in hyps_for_one_sent]
+    for (h_ind, (num, h_sent, feats)) in enumerate(hyps_for_one_sent):
+      h = h_sent.strip().split()
+      data[ind]['kbest'][h_ind] = h
+      data[ind]['kbest_feats'][h_ind] = get_feats(h, src, feats)
+      data[ind]['bleu'][h_ind] = [i for i in bleu.bleu_stats(h,ref)]
 
   shortcuts = {'p(e)' : 'l', 'p(e|f)' : 't', 'p_lex(f|e)' : 'u', 'word_cnt' : 'c', 'untranslated_cnt': 'g'}
   weights = {'p(e)' : opts.lm, 'p(e|f)' : opts.tm1, 'p_lex(f|e)' : opts.tm2, 'word_cnt':-0.5, 'untranslated_cnt':-0.5}

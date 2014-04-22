@@ -2,6 +2,7 @@
 import optparse
 import sys
 from math import exp
+import string
 
 optparser = optparse.OptionParser()
 optparser.add_option("-k", "--kbest-list", dest="input", default="data/dev+test.100best", help="100-best translation lists")
@@ -24,11 +25,13 @@ def get_feats(h, s, feats):
   for feat in feats.split(' '):
     (k, v) = feat.split('=')
     f[k] = float(v)
-  f['word_cnt'] = (1.0-len(s))/len(h) if len(h) <= len(s) else 1
+  # f['word_cnt'] = exp((1.0 - len(s))/len(h)) if len(h) <= len(s) else 1.0
+  f['word_cnt'] = -(1.0 - len(s))/len(h) if len(h) <= len(s) else 0.0
   f['untranslated_cnt'] = 0.0
   for htok in h:
-    if htok in s:
+    if htok in s and htok not in string.punctuation:
       f['untranslated_cnt'] += 1.0
+  # f['untranslated_cnt'] /= len(s)
   return f
 
 all_hyps = [pair.split(' ||| ') for pair in open(opts.input)]
