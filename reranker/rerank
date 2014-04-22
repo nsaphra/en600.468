@@ -24,7 +24,7 @@ def get_feats(h, s, feats):
   for feat in feats.split(' '):
     (k, v) = feat.split('=')
     f[k] = float(v)
-  f['word_cnt'] = exp((1.0-len(s))/len(h)) if len(h) <= len(s) else 1
+  f['word_cnt'] = (1.0-len(s))/len(h) if len(h) <= len(s) else 1
   f['untranslated_cnt'] = 0.0
   for htok in h:
     if htok in s:

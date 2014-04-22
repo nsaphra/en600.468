@@ -8,7 +8,7 @@ from math import exp
 import string
 
 grad = .05
-MIN_W = -5.0
+MIN_W = -1.0
 eps = .05
 
 class piecewise_fcn:
@@ -45,8 +45,8 @@ class piecewise_fcn:
       for s in self.y[ind]:
         bleu_stats = [sum(scores) for scores in zip(s, bleu_stats)]
       bleu_scores[ind] = bleu.bleu(bleu_stats)
+      stats = [sum(scores) for scores in zip(stats, bleu.bleu_stats(best.strip().split(),ref))]
     return max([((w+self.x[i+1])/2, score) for (i, (w, score)) in enumerate(zip(self.x[:-1], bleu_scores[:-1]))], key=lambda (x,y): y)
-
 
 def line_intersect(c1, x1, c2, x2):
   x = (c1-c2)/(x2-x1)
@@ -63,7 +63,7 @@ def upper_envelope(kbest_h, kbest_feats, bleu_stats, feat_name, weights):
   ((prev_slope, prev_const), prev_h_ind, prev_bleu) = data[prev_sort_ind]
   ret = []
   prev_w_min = MIN_W
-  while (prev_sort_ind < len(kbest_h)):
+  while (prev_sort_ind < len(data)):
     (top_sort_ind, top_slope, top_const, top_w_min, top_score) = (-1, 0, 0, -MIN_W, -10000)
     for (sort_ind_add, ((slope, const), h_ind, curr_bleu)) in enumerate(data[prev_sort_ind:]):
       sort_ind = sort_ind_add+prev_sort_ind
@@ -80,9 +80,24 @@ def upper_envelope(kbest_h, kbest_feats, bleu_stats, feat_name, weights):
     if top_sort_ind < 0 or top_w_min >= -MIN_W:
       ret.append((prev_h_ind, prev_w_min, -MIN_W, prev_bleu))
       break
+
+    # TODO del
+    prev_top_score_ = prev_slope*(top_w_min+prev_w_min)/2+prev_const
+    for (sort_i, ((slope_, const_), h_ind_, curr_bleu_)) in enumerate(data):
+      score_ = slope_*(top_w_min+prev_w_min)/2+const_
+      if sort_i == prev_sort_ind:
+        if abs(prev_top_score_ - score_) > 1e-14:
+          sys.stderr.write("%f %f\n" % (prev_top_score_, score_))
+          assert(abs(prev_score - score_) < 1e-14)
+      else:
+        if prev_top_score_ < prev_score:
+          sys.stderr.write( "%f %f\n" % (prev_top_score_, score_))
+#          assert(False)
+
     ret.append((prev_h_ind, prev_w_min, top_w_min, prev_bleu))
     prev_sort_ind = top_sort_ind
     prev_w_min = top_w_min
+    prev_score = top_score
     ((prev_slope, prev_const), prev_h_ind, prev_bleu) = data[top_sort_ind]
   return ret
 
@@ -94,6 +109,7 @@ def mert(weights, data):
       for (h_ind, w_min, w_max, curr_bleu_stats) in upper_envelope(d['kbest'], d['kbest_feats'], d['bleu'], name, new_weights):
         f.incr(w_min, w_max, sent_ind, curr_bleu_stats)
     (top_w, b) = f.find_max()
+    sys.stderr.write("%f\n" % b)
     new_weights[name] = top_w
   return new_weights
 
@@ -156,10 +172,12 @@ def main():
     (sent_id, h_sent, base_feats) = l.split(' ||| ')
     ind = sent_ind_from_id[sent_id]
     s = data[ind]['src']
+    r = data[ind]['ref']
     h = h_sent.strip().split()
     feats = get_feats(h, s, base_feats)
     data[ind]['kbest'].append(h)
     data[ind]['kbest_feats'].append(feats)
+    data[ind]['bleu'].append([score for score in bleu.bleu_stats(h,r)])
 
   for (ind, d) in data.items():
     r = d['ref']
