@@ -15,16 +15,13 @@ class piecewise_fcn:
   def __init__(self, num_sent):
     self.x = [MIN_W, -MIN_W]
     y_dflt = [-1 for sent in range(num_sent)]
-    self.y = [y_dflt, copy.copy(y_dflt)]
+    self.y = [y_dflt, copy.deepcopy(y_dflt)]
 
   def find_x(self, x, sent_ind):
     ind = bisect_left(self.x, x)
     if ind < len(self.x) and self.x[ind] == x:
       self.y[ind][sent_ind] = -1
       return ind
-    if ind == 0 or ind >= len(self.x):
-      sys.stderr.write( "AGH WHAT")
-      return -1
     self.x.insert(ind, x)
     self.y.insert(ind, copy.copy(self.y[ind-1]))
     self.y[ind][sent_ind] = -1
@@ -93,9 +90,12 @@ def upper_envelope(kbest_h, kbest_feats, bleu_stats, feat_name, weights):
           sys.stderr.write("%f %f\n" % (prev_top_score_, score_))
           assert(abs(prev_score - score_) < 1e-14)
       else:
-        if prev_top_score_ < prev_score:
-          sys.stderr.write("feat %s: curr w_min %f, curr w max %f\n" % (feat_name, prev_w_min, top_w_min))
-          sys.stderr.write( "%f %f\n" % (prev_top_score_, score_))
+        if score_ > prev_top_score_:
+          print ("feat %s: curr w_min %f, curr w max %f" % (feat_name, prev_w_min, top_w_min))
+          print ( "%f %f" % (prev_top_score_, score_))
+        # if prev_top_score_ < prev_score:
+        #   sys.stderr.write("feat %s: curr w_min %f, curr w max %f\n" % (feat_name, prev_w_min, top_w_min))
+        #   sys.stderr.write( "%f %f\n" % (prev_top_score_, score_))
 #          assert(False)
 
     # print prev_bleu
@@ -113,6 +113,7 @@ def mert(weights, data):
     for (sent_ind, d) in enumerate(data):
       assert(len(d['kbest']) == len(d['kbest_feats']) and len(d['kbest_feats']) == len(d['bleu']))
       for (h_ind, w_min, w_max, curr_bleu_stats) in upper_envelope(d['kbest'], d['kbest_feats'], d['bleu'], name, new_weights):
+
         f.incr(w_min, w_max, sent_ind, curr_bleu_stats)
     (top_w, b) = f.find_max()
     sys.stderr.write("newbleu: %f\n" % b)
@@ -155,12 +156,56 @@ def performance(weights, dev_src, dev_kbest, dev_ref, print_out=False):
       hyp = h_sent.strip().split()
       for (k,v) in get_feats(hyp, src, feats).items():
         score += weights[k] * v
+
+      f = get_feats(hyp, src, feats)
+      for (k,v) in f.items():
+        (slope, const) = sep_feat(f, k, weights)
+        new_score = get_score(slope, const, weights[k])
+        # if abs(score - new_score) > 1e-13:
+        #   print "%f %f" % (score, new_score)
+
       if score > best_score:
         (best_score, best) = (score, h_sent)
     stats.append([i for i in bleu.bleu_stats(best.strip().split(),ref)])
     # if print_out:
     #   print best
   return score_bleu_stats(stats)
+
+
+# def performance_predef(weights, all_feats, bleu_stats):
+#   stats = []
+#   for (sent_feats, sent_bleu_stats) in zip(all_feats, bleu_stats):
+#     (best_score, best) = (-1e300, [])
+#     for (hyp_feats, hyp_bleu_stats) in zip(sent_feats, sent_bleu_stats):
+#       score = 0.0
+#       for (k, v) in hyp_feats.items():
+#         score += weights[k] * v
+#       if score > best_score:
+#         (best_score, best) = (score, hyp_bleu_stats)
+#     stats.append(best)
+#   return score_bleu_stats(stats)
+
+
+# def performance(weights, dev_src, dev_kbest, dev_ref, print_out=False):
+#   all_hyps = [pair.split(' ||| ') for pair in open(dev_kbest)]
+#   num_sents = len(all_hyps) / 100
+#   ref_file = open(dev_ref)
+#   src_file = open(dev_src)
+#   all_feats = []
+#   all_stats = []
+#   for (ref, src, s) in zip(ref_file, src_file, xrange(0, num_sents)):
+#     hyps_for_one_sent = all_hyps[s * 100:s * 100 + 100]
+#     ref = ref.strip().split()
+#     src = src.strip().split()
+#     sent_feats = []
+#     sent_stats = []
+#     for (it2, (num, h_sent, feats)) in enumerate(hyps_for_one_sent):
+#       hyp = h_sent.strip().split()
+#       sent_feats.append(get_feats(hyp, src, feats))
+#       sent_stats.append([i for i in bleu.bleu_stats(hyp,ref)])
+#     all_feats.append(sent_feats)
+#     all_stats.append(sent_stats)
+#   return performance_predef(weights, all_feats, all_stats)
 
 def main():
   optparser = optparse.OptionParser()
@@ -179,6 +224,7 @@ def main():
     (sent_id, src_sent) = s.split(' ||| ', 1)
     src = src_sent.strip().split()
     ref = data[ind]['ref']
+    ref_ = copy.copy(ref)
     data[ind]['src'] = src
     hyps_for_one_sent = all_hyps[ind * 100:ind * 100 + 100]
     data[ind]['kbest'] = [-1 for i in hyps_for_one_sent]
