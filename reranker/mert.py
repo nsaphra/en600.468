@@ -9,12 +9,25 @@ import string
 import math
 
 grad = .05
-MIN_W = -5.0
+MIN_W = -2.0
 eps = .05
 
 train_src_ = "data/train.src"
 train_kbest_ = "data/train.100best"
 train_ref_ = "data/train.ref"
+
+def get_feats(h, s, feats):
+  f = {}
+  for feat in feats.split(' '):
+    (k, v) = feat.split('=')
+    f[k] = float(v) #math.log(float(v)/10)
+  f['word_cnt'] = (1.0 - len(s))/len(h) if len(h) <= len(s) else 0.0
+  f['untranslated_cnt'] = 0.0
+  for htok in h:
+    if htok in s and htok not in string.punctuation:
+      f['untranslated_cnt'] += 1.0
+  f['untranslated_cnt'] /= len(h)
+  return f
 
 class piecewise_fcn:
   def __init__(self, num_sent):
@@ -104,21 +117,6 @@ def mert(weights, data):
     sys.stderr.write( "test BLEU %f\n" % performance(weights, "data/dev+test.src", "data/dev+test.100best", "data/dev.ref"))
   return weights
 
-def get_feats(h, s, feats):
-  f = {}
-  for feat in feats.split(' '):
-    (k, v) = feat.split('=')
-    f[k] = float(v)
-  f['word_cnt'] = 0.0
-  f['untranslated_cnt'] = 0.0
-  # f['word_cnt'] = exp((1.0 - len(s))/len(h)) if len(h) <= len(s) else 1.0
-  # f['word_cnt'] = -(1.0 - len(s))/len(h) if len(h) <= len(s) else 0.0
-  # f['untranslated_cnt'] = 0.0
-  # for htok in h:
-  #   if htok in s and htok not in string.punctuation:
-  #     f['untranslated_cnt'] += 1.0
-  # f['untranslated_cnt'] /= len(s)
-  return f
 
 def score_bleu_stats(bleu_stats):
   stats = [0.0 for i in xrange(10)]
@@ -168,6 +166,8 @@ def main():
   data = [{'ref':r.strip().split()} for r in open(opts.ref)]
   all_hyps = [pair.split(' ||| ') for pair in open(opts.kbest)]
   for (ind, s) in enumerate(open(opts.src)):
+    if ind >= len(data):
+      break
     (sent_id, src_sent) = s.split(' ||| ', 1)
     src = src_sent.strip().split()
     ref = data[ind]['ref']
@@ -217,13 +217,15 @@ def main():
       diff += abs(w - weights[n])
     it += 1
     if diff <= eps or abs(train_bleu - prev_bleu) < eps:
+      break
       it += 1
       sys.stderr.write( "RANDOM RESTART\n")
       for name in weights.keys():
         weights[name] = random.uniform(MIN_W, -MIN_W)
   prev_bleu = train_bleu
   sys.stderr.write( "BEST:\n")
-  sys.stderr.write( "train BLEU %f\n" % best_bleu)
+  sys.stderr.write( "overall BLEU %f\n" % best_bleu)
+  sys.stderr.write( "train BLEU %f\n" % performance(best_w, train_src_, train_kbest_, train_ref_))
   sys.stderr.write( "test BLEU %f\n" % performance(best_w, "data/dev+test.src", "data/dev+test.100best", "data/dev.ref"))
   out = ""
   for (n, w) in best_w.items():
