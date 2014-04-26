@@ -3,15 +3,16 @@ import optparse
 import sys
 from math import exp
 import string
+import math
 
 optparser = optparse.OptionParser()
 optparser.add_option("-k", "--kbest-list", dest="input", default="data/dev+test.100best", help="100-best translation lists")
 optparser.add_option("-s", "--src-file", dest="src", default="data/dev+test.src", help="source text")
-optparser.add_option("-l", "--lm", dest="lm", default=-1.0, type="float", help="Language model weight")
+optparser.add_option("-l", "--lm", dest="lm", default=-0.5, type="float", help="Language model weight")
 optparser.add_option("-t", "--tm1", dest="tm1", default=-0.5, type="float", help="Translation model p(e|f) weight")
 optparser.add_option("-u", "--tm2", dest="tm2", default=-0.5, type="float", help="Lexical translation model p_lex(f|e) weight")
-optparser.add_option("-c", "--word_cnt", dest="bp", default=0.5, type="float", help="brevity penalty weight")
-optparser.add_option("-g", "--greek_to_me", dest="untranslated", default=0.5, type="float", help="untranslated token weight")
+optparser.add_option("-c", "--word_cnt", dest="bp", default=-0.5, type="float", help="brevity penalty weight")
+optparser.add_option("-g", "--greek_to_me", dest="untranslated", default=-0.5, type="float", help="untranslated token weight")
 
 (opts, _) = optparser.parse_args()
 weights = {'p(e)'       : float(opts.lm) ,
@@ -20,26 +21,30 @@ weights = {'p(e)'       : float(opts.lm) ,
            'word_cnt'   : float(opts.bp),
            'untranslated_cnt' : float(opts.untranslated)}
 
+
 def get_feats(h, s, feats):
   f = {}
   for feat in feats.split(' '):
     (k, v) = feat.split('=')
-    f[k] = float(v)
+    f[k] = float(v) #math.log(float(v)/10)
+  f['word_cnt'] = 0.0
+#  f['untranslated_cnt'] = 0.0
   # f['word_cnt'] = exp((1.0 - len(s))/len(h)) if len(h) <= len(s) else 1.0
-  f['word_cnt'] = -(1.0 - len(s))/len(h) if len(h) <= len(s) else 0.0
-  f['untranslated_cnt'] = 0.0
-  for htok in h:
-    if htok in s and htok not in string.punctuation:
-      f['untranslated_cnt'] += 1.0
+  f['word_cnt'] = (1.0 - len(s))/len(h) if len(h) <= len(s) else 0.0
+  # f['untranslated_cnt'] = 0.0
+  # for htok in h:
+  #   if htok in s and htok not in string.punctuation:
+  #     f['untranslated_cnt'] += 1.0
   # f['untranslated_cnt'] /= len(s)
   return f
 
+
 all_hyps = [pair.split(' ||| ') for pair in open(opts.input)]
-all_src = [s for s in open(opts.src)]
+all_src = [s.split(' ||| ') for s in open(opts.src)]
 num_sents = len(all_hyps) / 100
 for s in xrange(0, num_sents):
   hyps_for_one_sent = all_hyps[s * 100:s * 100 + 100]
-  src = all_src[s].strip().split()
+  src = all_src[s][1].strip().split()
   (best_score, best) = (-1e300, '')
   for (num, hyp, feats) in hyps_for_one_sent:
     f = get_feats(hyp.strip().split(), src, feats)
